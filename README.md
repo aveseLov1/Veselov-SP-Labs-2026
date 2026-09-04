@@ -1,1 +1,0 @@
-# Veselov-SP-Labs-2026
