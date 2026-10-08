@@ -2,175 +2,167 @@
 format ELF64
 public _start
 
-section '.data' writeable
-    msg_result db 'Result = '
-    msg_len = $ - msg_result
-
-    msg_error db 'Error: division by zero', 10
-    err_len = $ - msg_error
-
-    newline db 10
-
 section '.bss' writeable
-    a   rq 1
-    b   rq 1
-    c   rq 1
-    buf rb 32
+    input rb 128
+    output rb 32
+
+section '.data' writeable
+    msg db 'Enter n: '
+    msg_len = $ - msg
+    result_msg db 'Result = '
+    result_len = $ - result_msg
+    newline db 10
 
 section '.text' executable
 
 _start:
-    ; Сохраняем адрес argv
-    mov r15, rsp
-
-    ; Проверяем количество аргументов
-    cmp qword [r15], 4
-    jne exit_error
-
-    ; Получаем a
-    mov rdi, [r15+16]
-    call atoi
-    mov [a], rax
-
-    ; Получаем b
-    mov rdi, [r15+24]
-    call atoi
-    mov [b], rax
-
-    ; Получаем c
-    mov rdi, [r15+32]
-    call atoi
-    mov [c], rax
-
-    ; Проверяем b = 0
-    mov rbx, [b]
-    test rbx, rbx
-    jz division_error
-
-    ; Вычисляем (c-b)-b
-    mov rax, [c]
-    sub rax, rbx
-    sub rax, rbx
-
-    ; Делим на b
-    cqo
-    idiv rbx
-
-    ; Сохраняем результат
-    mov r12, rax
-
-    ; Выводим текст
+    ; Вывод приглашения
     mov rax, 1
     mov rdi, 1
-    mov rsi, msg_result
+    mov rsi, msg
     mov rdx, msg_len
     syscall
 
-    ; Выводим число
-    mov rax, r12
-    call print_number
+    ; Ввод n через read
+    call read_int
+    mov r12, rax
 
-    ; Завершаем программу
-    mov rax, 60
-    xor rdi, rdi
+    ; Инициализация
+    xor r14, r14
+    mov r13, 1
+
+sum_loop:
+    cmp r13, r12
+    jg sum_done
+
+    ; Вычисление k^2
+    mov rax, r13
+    imul rax, r13
+
+    ; Если k четное, меняем знак
+    test r13, 1
+    jnz positive
+
+    neg rax
+
+positive:
+    add r14, rax
+    inc r13
+    jmp sum_loop
+
+sum_done:
+    ; Вывод результата
+    mov rax, 1
+    mov rdi, 1
+    mov rsi, result_msg
+    mov rdx, result_len
     syscall
 
+    mov rax, r14
+    call print_int
+    call print_newline
 
-; --------------------------------
-; Преобразование строки в число
-; Вход: RDI = адрес строки
-; Выход: RAX = число
-; --------------------------------
+    jmp exit_program
 
-atoi:
-    xor rax, rax
-    xor r8, r8
 
-    mov r9, 1
+; Чтение целого числа
+read_int:
+    xor eax, eax
+    xor edi, edi
+    mov rsi, input
+    mov edx, 128
+    syscall
 
-    cmp byte [rdi], '-'
-    jne .loop
+    test rax, rax
+    jle read_zero
 
-    mov r9, -1
-    inc rdi
+    mov rcx, rax
+    mov rsi, input
+    xor eax, eax
+    mov r8, 1
 
-.loop:
-    movzx rdx, byte [rdi]
-    test rdx, rdx
-    jz .done
+    cmp byte [rsi], '-'
+    jne parse_loop
 
+    mov r8, -1
+    inc rsi
+    dec rcx
+
+parse_loop:
+    test rcx, rcx
+    jz parse_done
+
+    movzx rdx, byte [rsi]
     cmp rdx, '0'
-    jb .done
+    jb parse_done
     cmp rdx, '9'
-    ja .done
+    ja parse_done
 
     imul rax, 10
     sub rdx, '0'
     add rax, rdx
 
-    inc rdi
-    jmp .loop
+    inc rsi
+    dec rcx
+    jmp parse_loop
 
-.done:
-    imul rax, r9
+parse_done:
+    imul rax, r8
+    ret
+
+read_zero:
+    xor eax, eax
     ret
 
 
-; --------------------------------
-; Вывод знакового числа
-; Вход: RAX = число
-; --------------------------------
-
-print_number:
-    lea rsi, [buf+32]
+; Вывод целого числа
+print_int:
+    lea rsi, [output+32]
     mov r8, 10
-
     xor r9d, r9d
+
     test rax, rax
-    jns .convert
+    jns convert
 
     mov r9b, 1
     neg rax
 
-.convert:
+convert:
     xor edx, edx
     div r8
-
     add dl, '0'
     dec rsi
     mov [rsi], dl
 
     test rax, rax
-    jnz .convert
+    jnz convert
 
     test r9b, r9b
-    jz .output
+    jz output_number
 
     dec rsi
     mov byte [rsi], '-'
 
-.output:
-    lea rdx, [buf+32]
+output_number:
+    lea rdx, [output+32]
     sub rdx, rsi
 
     mov rax, 1
     mov rdi, 1
     syscall
-
     ret
 
 
-division_error:
+print_newline:
     mov rax, 1
     mov rdi, 1
-    mov rsi, msg_error
-    mov rdx, err_len
+    mov rsi, newline
+    mov rdx, 1
     syscall
+    ret
 
-    jmp exit_error
 
-
-exit_error:
+exit_program:
     mov rax, 60
-    mov rdi, 1
+    xor rdi, rdi
     syscall
