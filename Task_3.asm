@@ -1,181 +1,176 @@
-
 format ELF64
 public _start
 
 section '.bss' writeable
-    input rb 128
-    output rb 32
-
-section '.data' writeable
-    msg db 'Enter n: '
-    msg_len = $ - msg
-    result_msg db 'Result = '
-    result_len = $ - result_msg
-    newline db 10
+    buffer      rb 1048576
+    outbuf      rb 1048576
+    starts      rq 131072
+    lengths     rq 131072
 
 section '.text' executable
 
 _start:
-    ; Приглашение ко вводу
-    mov rax, 1
-    mov rdi, 1
-    mov rsi, msg
-    mov rdx, msg_len
+    ; Проверка аргументов
+    cmp qword [rsp], 3
+    jne exit
+
+    ; Открытие входного файла
+    mov rax, 2
+    mov rdi, [rsp+16]
+    xor rsi, rsi
+    syscall
+    test rax, rax
+    js exit
+    mov r14, rax
+
+    ; Чтение файла
+    xor rax, rax
+    mov rdi, r14
+    mov rsi, buffer
+    mov rdx, 1048576
+    syscall
+    test rax, rax
+    js close_input
+    mov r13, rax
+
+    ; Закрытие входного файла
+    mov rax, 3
+    mov rdi, r14
     syscall
 
-    ; Читаем n
-    call read_int
-    mov r12, rax
+    ; Проверка последнего символа
+    xor rbx, rbx
+    test r13, r13
+    jz parse_lines
 
-    xor r14, r14
-    mov r13, 1
+    cmp byte [buffer+r13-1], 10
+    jne parse_lines
+    mov rbx, 1
 
-sum_loop:
-    cmp r13, r12
-    jg sum_done
+parse_lines:
+    xor r9, r9          ; Количество строк
+    xor r8, r8          ; Начало текущей строки
+    xor rcx, rcx        ; Индекс символа
 
-    ; k * (k+1)
+scan_lines:
+    cmp rcx, r13
+    jae finish_scan
+
+    cmp byte [buffer+rcx], 10
+    jne next_char
+
+    mov [starts+r9*8], r8
+
+    mov rax, rcx
+    sub rax, r8
+    mov [lengths+r9*8], rax
+
+    inc r9
+    lea r8, [rcx+1]
+
+next_char:
+    inc rcx
+    jmp scan_lines
+
+finish_scan:
+    ; Последняя строка без символа перевода строки
+    cmp r8, r13
+    jae prepare_output
+
+    mov [starts+r9*8], r8
+
     mov rax, r13
-    lea rbx, [r13+1]
-    imul rax, rbx
+    sub rax, r8
+    mov [lengths+r9*8], rax
 
-    ; Умножаем на (3k+1)
-    mov rbx, r13
-    imul rbx, 3
-    add rbx, 1
-    imul rax, rbx
+    inc r9
 
-    ; Умножаем на (3k+2)
-    mov rbx, r13
-    imul rbx, 3
-    add rbx, 2
-    imul rax, rbx
+prepare_output:
+    xor r10, r10       ; Позиция в выходном буфере
 
-    ; (-1)^k
-    test r13, 1
-    jz positive
+    test r9, r9
+    jz write_result
 
-    neg rax
+    dec r9
 
-positive:
-    add r14, rax
+reverse_lines:
+    ; Получение начала и длины строки
+    mov rax, [starts+r9*8]
+    mov rdx, [lengths+r9*8]
 
-    inc r13
-    jmp sum_loop
+    ; Копирование строки
+    lea rsi, [buffer+rax]
+    lea rdi, [outbuf+r10]
+    mov rcx, rdx
+    rep movsb
 
-sum_done:
-    ; Вывод результата
-    mov rax, 1
-    mov rdi, 1
-    mov rsi, result_msg
-    mov rdx, result_len
+    add r10, rdx
+
+    ; Добавление перевода строки
+    cmp r9, 0
+    jne add_newline
+
+    cmp rbx, 1
+    jne next_line
+
+add_newline:
+    mov byte [outbuf+r10], 10
+    inc r10
+
+next_line:
+    test r9, r9
+    jz write_result
+
+    dec r9
+    jmp reverse_lines
+
+write_result:
+    ; Создание выходного файла
+    mov rax, 2
+    mov rdi, [rsp+24]
+    mov rsi, 577
+    mov rdx, 420
     syscall
-
-    mov rax, r14
-    call print_int
-    call print_newline
-
-    jmp exit_program
-
-
-; Чтение целого числа
-read_int:
-    xor eax, eax
-    xor edi, edi
-    mov rsi, input
-    mov edx, 128
-    syscall
-
     test rax, rax
-    jle read_zero
+    js exit
+    mov r15, rax
 
-    mov rcx, rax
-    mov rsi, input
-    xor eax, eax
-    mov r8, 1
+    ; Запись результата
+    mov rdi, r15
+    mov rsi, outbuf
+    mov rdx, r10
 
-    cmp byte [rsi], '-'
-    jne parse_loop
-
-    mov r8, -1
-    inc rsi
-    dec rcx
-
-parse_loop:
-    test rcx, rcx
-    jz parse_done
-
-    movzx rdx, byte [rsi]
-    cmp rdx, '0'
-    jb parse_done
-    cmp rdx, '9'
-    ja parse_done
-
-    imul rax, 10
-    sub rdx, '0'
-    add rax, rdx
-
-    inc rsi
-    dec rcx
-    jmp parse_loop
-
-parse_done:
-    imul rax, r8
-    ret
-
-read_zero:
-    xor eax, eax
-    ret
-
-
-; Вывод целого числа
-print_int:
-    lea rsi, [output+32]
-    mov r8, 10
-    xor r9d, r9d
-
-    test rax, rax
-    jns convert
-
-    mov r9b, 1
-    neg rax
-
-convert:
-    xor edx, edx
-    div r8
-    add dl, '0'
-    dec rsi
-    mov [rsi], dl
-
-    test rax, rax
-    jnz convert
-
-    test r9b, r9b
-    jz output_number
-
-    dec rsi
-    mov byte [rsi], '-'
-
-output_number:
-    lea rdx, [output+32]
-    sub rdx, rsi
+write_loop:
+    test rdx, rdx
+    jz finish
 
     mov rax, 1
-    mov rdi, 1
     syscall
-    ret
+    test rax, rax
+    jle close_output
 
+    add rsi, rax
+    sub rdx, rax
+    jmp write_loop
 
-print_newline:
-    mov rax, 1
-    mov rdi, 1
-    mov rsi, newline
-    mov rdx, 1
+close_output:
+    mov rax, 3
+    mov rdi, r15
     syscall
-    ret
+    jmp exit
 
+finish:
+    mov rax, 3
+    mov rdi, r15
+    syscall
 
-exit_program:
+exit:
     mov rax, 60
     xor rdi, rdi
     syscall
+
+close_input:
+    mov rax, 3
+    mov rdi, r14
+    syscall
+    jmp exit

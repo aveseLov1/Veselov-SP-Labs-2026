@@ -1,0 +1,3 @@
+I love Assembly!
+How are you?
+Hello world.

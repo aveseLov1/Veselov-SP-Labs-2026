@@ -1,114 +1,137 @@
-
 format ELF64
 public _start
 
-section '.data' writeable
-    password db '1234'
-    password_len = $ - password
-
-    msg_input db 'Enter password: '
-    input_len = $ - msg_input
-
-    msg_wrong db 'Incorrect password', 10
-    wrong_len = $ - msg_wrong
-
-    msg_success db 'Successful', 10
-    success_len = $ - msg_success
-
-    msg_fail db 'Failed', 10
-    fail_len = $ - msg_fail
-
 section '.bss' writeable
-    input rb 128
+    buffer rb 1048576
 
 section '.text' executable
 
 _start:
-    mov r12, 5
+    ; Проверка аргументов
+    cmp qword [rsp], 3
+    jne exit
 
-auth_loop:
-    ; Приглашение ко вводу
-    mov rax, 1
-    mov rdi, 1
-    mov rsi, msg_input
-    mov rdx, input_len
+    ; Открытие входного файла
+    mov rax, 2
+    mov rdi, [rsp+16]
+    xor rsi, rsi
     syscall
-
-    ; Ввод пароля через read
-    mov rax, 0
-    mov rdi, 0
-    mov rsi, input
-    mov rdx, 128
-    syscall
-
     test rax, rax
-    jle wrong_password
-
-    ; Сохраняем длину введённой строки
+    js exit
     mov r14, rax
 
-    ; Убираем символ перевода строки
-    xor rcx, rcx
+    ; Чтение файла
+    xor rax, rax
+    mov rdi, r14
+    mov rsi, buffer
+    mov rdx, 1048576
+    syscall
+    test rax, rax
+    js close_input
+    mov r13, rax
 
-find_end:
-    cmp rcx, r14
-    jge check_length
-
-    cmp byte [input+rcx], 10
-    je check_length
-
-    inc rcx
-    jmp find_end
-
-check_length:
-    ; Проверяем длину пароля
-    cmp rcx, password_len
-    jne wrong_password
-
-    ; Сравниваем пароль посимвольно
-    xor rsi, rsi
-
-compare_loop:
-    cmp rsi, password_len
-    jge correct_password
-
-    mov al, [input+rsi]
-    cmp al, [password+rsi]
-    jne wrong_password
-
-    inc rsi
-    jmp compare_loop
-
-correct_password:
-    ; Пароль правильный
-    mov rax, 1
-    mov rdi, 1
-    mov rsi, msg_success
-    mov rdx, success_len
+    ; Закрытие входного файла
+    mov rax, 3
+    mov rdi, r14
     syscall
 
-    jmp exit_program
+    xor r8, r8          ; Начало предложения
+    xor r9, r9          ; Текущая позиция
 
-wrong_password:
-    ; Выводим сообщение об ошибке
+scan_text:
+    cmp r9, r13
+    jae write_result
+
+    mov al, [buffer+r9]
+
+    ; Проверка конца предложения
+    cmp al, '.'
+    je reverse_sentence
+
+    cmp al, '!'
+    je reverse_sentence
+
+    cmp al, '?'
+    je reverse_sentence
+
+    inc r9
+    jmp scan_text
+
+reverse_sentence:
+    ; Левая и правая границы предложения
+    mov r10, r8
+    mov r11, r9
+
+reverse_loop:
+    cmp r10, r11
+    jae reverse_done
+
+    ; Обмен символов
+    mov al, [buffer+r10]
+    mov dl, [buffer+r11]
+
+    mov [buffer+r10], dl
+    mov [buffer+r11], al
+
+    inc r10
+    dec r11
+
+    jmp reverse_loop
+
+reverse_done:
+    ; Следующее предложение
+    lea r8, [r9+1]
+    inc r9
+    jmp scan_text
+
+write_result:
+    ; Создание выходного файла
+    mov rax, 2
+    mov rdi, [rsp+24]
+    mov rsi, 577
+    mov rdx, 420
+    syscall
+    test rax, rax
+    js exit
+    mov r15, rax
+
+    ; Запись результата
+    mov rdi, r15
+    mov rsi, buffer
+    mov rdx, r13
+
+write_loop:
+    test rdx, rdx
+    jz finish
+
     mov rax, 1
-    mov rdi, 1
-    mov rsi, msg_wrong
-    mov rdx, wrong_len
+    syscall
+    test rax, rax
+    jle close_output
+
+    add rsi, rax
+    sub rdx, rax
+
+    jmp write_loop
+
+close_output:
+    mov rax, 3
+    mov rdi, r15
+    syscall
+    jmp exit
+
+finish:
+    mov rax, 3
+    mov rdi, r15
     syscall
 
-    ; Уменьшаем количество попыток
-    dec r12
-    jnz auth_loop
-
-    ; Все попытки использованы
-    mov rax, 1
-    mov rdi, 1
-    mov rsi, msg_fail
-    mov rdx, fail_len
-    syscall
-
-exit_program:
+exit:
     mov rax, 60
     xor rdi, rdi
     syscall
+
+close_input:
+    mov rax, 3
+    mov rdi, r14
+    syscall
+    jmp exit
