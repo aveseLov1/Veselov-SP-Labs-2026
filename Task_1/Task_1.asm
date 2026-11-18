@@ -16,7 +16,7 @@ _start:
         push rcx
         call print_symb
         pop rcx
-        dec rcx
+        sub rcx, 2
         cmp rcx, 0
     jne .iter
     mov al, 0xA

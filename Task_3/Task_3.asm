@@ -19,6 +19,8 @@ _start:
             push rbx
             push rcx
             call print_symb
+
+
             pop rcx
             pop rbx
             pop rdx
@@ -30,6 +32,8 @@ _start:
         push rcx
         mov al, 0xA
         call print_symb   ; перевод строки
+        mov al, 0xA
+        call print_symb
         pop rcx
         pop rdx
         inc rdx
